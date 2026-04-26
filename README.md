@@ -100,4 +100,4 @@ Built with [Torus Framework](https://github.com/OZmasterAI/Torus-Framework) — 
 
 ## License
 
-Private repository.
+Apache-2.0
