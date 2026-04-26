@@ -10,8 +10,11 @@ Used via MCP: registered via `claude mcp add`
 
 import argparse
 import functools
+import json
 import os
 import sys
+import threading
+import time
 import traceback
 
 # ── Resolve shared modules from Torus-Framework hooks ──
@@ -30,6 +33,10 @@ _SKILLS_DIR = os.path.join(_CLAUDE_DIR, "skills")
 _SKILL_DIRS = [_SKILL_LIBRARY, _SKILLS_DIR]
 _STATE_DIR = os.path.join(_CLAUDE_DIR, "hooks", ".state")
 _DB_PATH = os.path.join(_STATE_DIR, "skills.db")
+_EVOLUTION_TRIGGER_DIR = os.path.join(
+    f"/run/user/{os.getuid()}/claude-hooks", "evolution_triggers"
+)
+_EVOLUTION_TRIGGER_MAX_AGE = 3600  # ignore triggers older than 1 hour
 
 # ── Transport config — streamable-http default, --stdio for pipe mode ──
 _NET_HOST = os.environ.get("SKILLS_HOST", "127.0.0.1")
@@ -255,6 +262,69 @@ def list_skills() -> dict:
     return {"skills": skills, "count": len(skills)}
 
 
+def _process_pending_evolutions() -> list[dict]:
+    """Consume evolution trigger files from ramdisk and spawn background evolution threads.
+
+    Returns list of triggered evolutions (for reporting in invoke_skill response).
+    """
+    triggered = []
+    try:
+        if not os.path.isdir(_EVOLUTION_TRIGGER_DIR):
+            return triggered
+        for fname in os.listdir(_EVOLUTION_TRIGGER_DIR):
+            if not fname.endswith(".json"):
+                continue
+            fpath = os.path.join(_EVOLUTION_TRIGGER_DIR, fname)
+            try:
+                with open(fpath) as f:
+                    trigger = json.load(f)
+                os.remove(fpath)
+
+                if (
+                    time.time() - trigger.get("triggered_at", 0)
+                    > _EVOLUTION_TRIGGER_MAX_AGE
+                ):
+                    continue
+
+                skill_name = trigger["skill_name"]
+                evo_type = trigger.get("evolution_type", "FIX")
+
+                def _evolve(name=skill_name, etype=evo_type):
+                    try:
+                        result = (
+                            _run_derived_evolution(name)
+                            if etype == "DERIVED"
+                            else _run_evolution(name)
+                        )
+                        status = "evolved" if result.get("success") else "failed"
+                        print(
+                            f"[Skill MCP v2] auto-evolution {status}: {name} ({etype})",
+                            file=sys.stderr,
+                        )
+                    except Exception as e:
+                        print(
+                            f"[Skill MCP v2] auto-evolution error: {name}: {e}",
+                            file=sys.stderr,
+                        )
+
+                threading.Thread(target=_evolve, daemon=True).start()
+                triggered.append(
+                    {
+                        "skill": skill_name,
+                        "evolution_type": evo_type,
+                        "status": "auto-triggered in background",
+                    }
+                )
+            except (json.JSONDecodeError, OSError, KeyError):
+                try:
+                    os.remove(fpath)
+                except OSError:
+                    pass
+    except OSError:
+        pass
+    return triggered
+
+
 @mcp.tool()
 @crash_proof
 def invoke_skill(name: str) -> dict:
@@ -284,11 +354,18 @@ def invoke_skill(name: str) -> dict:
     skill_id = _ensure_skill_in_db(name)
     record_selection(_get_db(), skill_id)
 
-    return {
+    result = {
         "name": name,
         "content": content,
         "tokens_est": int(len(content) / 3.8),
     }
+
+    # Auto-evolve degraded skills (non-blocking background threads)
+    pending = _process_pending_evolutions()
+    if pending:
+        result["auto_evolution"] = pending
+
+    return result
 
 
 _SELF_IMPROVE_SKILLS = {
