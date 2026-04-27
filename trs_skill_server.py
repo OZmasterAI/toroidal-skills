@@ -56,6 +56,11 @@ _parser.add_argument(
     help="Use stdio transport (for subprocess/pipe mode)",
 )
 _parser.add_argument("--port", type=int, default=_NET_PORT)
+_parser.add_argument(
+    "--embeddings",
+    action="store_true",
+    help="Enable NIM embedding search (default: BM25-only)",
+)
 _args, _ = _parser.parse_known_args()
 
 if _args.stdio:
@@ -114,7 +119,7 @@ def _get_search():
     if _search_engine is None:
         from shared.skill_search import HybridSearch
 
-        _search_engine = HybridSearch()
+        _search_engine = HybridSearch(use_embeddings=_args.embeddings)
         _index_all_skills()
     return _search_engine
 
@@ -838,28 +843,32 @@ def skill_health() -> dict:
 
 
 if __name__ == "__main__":
-    import threading
-
     # Phase 1 (main thread): index all skills into BM25 immediately.
-    # add() no longer blocks on embedding model, so this is fast.
+    # Reads every SKILL.md, tokenizes text, builds BM25Okapi index.
+    # No model loading — this is pure keyword indexing, completes in <200ms.
     _get_search()
 
-    # Phase 2 (background): load embedding model for semantic search.
-    # BM25 search works immediately; hybrid activates when model is ready.
-    def _warmup_embeddings():
-        try:
-            from shared.skill_search import _get_embedding_model
+    # Phase 2 (background): if --embeddings, pre-compute NIM API vectors
+    # so the first search_skills call doesn't pay the embedding latency.
+    # Default mode is BM25-only — no embeddings, no warmup needed.
+    if _args.embeddings:
+        import threading
 
-            _get_embedding_model()
-        except Exception:
-            pass
+        def _warmup_embeddings():
+            try:
+                engine = _get_search()
+                if engine.embedding is not None:
+                    engine.embedding._ensure_embeddings()
+            except Exception:
+                pass
 
-    threading.Thread(target=_warmup_embeddings, daemon=True).start()
+        threading.Thread(target=_warmup_embeddings, daemon=True).start()
 
     _mode = "stdio" if _args.stdio else "streamable-http"
+    _emb_label = "+NIM" if _args.embeddings else "BM25-only"
     if _args.http:
         print(
-            f"[Skill MCP v2] Starting {_mode} on {_NET_HOST}:{_args.port}",
+            f"[Skill MCP v2] Starting {_mode} on {_NET_HOST}:{_args.port} ({_emb_label})",
             file=sys.stderr,
         )
     mcp.run(transport=_mode)
