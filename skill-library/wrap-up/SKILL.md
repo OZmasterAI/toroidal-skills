@@ -17,7 +17,7 @@ When the user says "wrap up", "done", "end session", "save progress", or is fini
    - Present promotion suggestions to user for approval — never auto-promote
 <!-- 3.5. UPDATE WIKI — disabled, re-enable when ready
    Read ~/vault/wiki/_index.md. For each topic touched this session, invoke wiki-update.
-   Use run_tool("skills-v2", "invoke_skill", {"name": "wiki-update"}) for guidance. -->
+   Use run_tool("torus-skills", "invoke_skill", {"name": "wiki-update"}) for guidance. -->
 4. **UPDATE STATE** — Run `python3 -c "import sys; sys.path.insert(0, '$HOME/.claude/hooks'); from boot_pkg.util import detect_project; n,d,s,sd = detect_project(); print(sd or d or '')"` to detect project root. If it returns a path, write to `{path}/.claude-state.json`. If empty (framework/hub session), write to `~/.claude/LIVE_STATE.json`. This covers `~/projects/`, `~/agents/`, and `~/worktrees/` automatically. In your summary message, say "State saved to .claude-state.json" (for projects) or "State saved to LIVE_STATE.json" (for framework hub) — use the correct name for whichever file you actually wrote to. Write with:
    - Updated session count
    - `feature` — short keyword tag for current work area (e.g. "session-isolation", "github-sync", "none")
