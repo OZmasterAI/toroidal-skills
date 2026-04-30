@@ -17,9 +17,10 @@ import threading
 import time
 import traceback
 
-# ── Resolve shared modules from Torus-Framework hooks ──
-_HOOKS_DIR = os.environ.get("TORUS_HOOKS_DIR", os.path.expanduser("~/.claude/hooks"))
-sys.path.insert(0, _HOOKS_DIR)
+# ── Ensure torus-skills root is importable (for trs.shared.*) ──
+_TRS_ROOT = os.path.dirname(os.path.abspath(__file__))
+if _TRS_ROOT not in sys.path:
+    sys.path.insert(0, _TRS_ROOT)
 
 from mcp.server.fastmcp import FastMCP
 
@@ -107,7 +108,7 @@ def _get_db():
     global _db_conn
     if _db_conn is None:
         os.makedirs(_STATE_DIR, exist_ok=True)
-        from shared.skill_db import init_db
+        from trs.shared.skill_db import init_db
 
         _db_conn = init_db(_DB_PATH)
     return _db_conn
@@ -117,7 +118,7 @@ def _get_search():
     """Get or create the hybrid search engine (lazy, singleton)."""
     global _search_engine
     if _search_engine is None:
-        from shared.skill_search import HybridSearch
+        from trs.shared.skill_search import HybridSearch
 
         _search_engine = HybridSearch(use_embeddings=_args.embeddings)
         _index_all_skills()
@@ -198,7 +199,7 @@ def _all_available_skills():
 
 def _ensure_skill_in_db(name: str) -> str:
     """Ensure skill exists in SQLite, return skill_id."""
-    from shared.skill_db import get_or_create_skill
+    from trs.shared.skill_db import get_or_create_skill
 
     conn = _get_db()
     skill_dir, _ = _find_skill(name)
@@ -219,7 +220,7 @@ def list_skills() -> dict:
     Searches both skill-library/ and skills/ directories.
     Use this to discover available skills before invoking one.
     """
-    from shared.skill_db import get_skill_by_name, computed_rates
+    from trs.shared.skill_db import get_skill_by_name, computed_rates
 
     conn = _get_db()
     skills = []
@@ -342,7 +343,7 @@ def invoke_skill(name: str) -> dict:
     Returns the complete SKILL.md content. Follow the instructions returned.
     Records the selection in SQLite for quality tracking.
     """
-    from shared.skill_db import record_selection
+    from trs.shared.skill_db import record_selection
 
     skill_dir, md_path = _find_skill(name)
 
@@ -418,7 +419,7 @@ def skill_usage() -> dict:
 
     Returns selection counts, quality rates, and recent activity per skill.
     """
-    from shared.skill_db import get_all_skill_records, computed_rates
+    from trs.shared.skill_db import get_all_skill_records, computed_rates
 
     conn = _get_db()
     records = get_all_skill_records(conn)
@@ -497,7 +498,7 @@ def record_outcome(
         context: Brief description of what happened (optional).
         analyze: If True, run LLM post-task analysis (stores judgments, updates counters).
     """
-    from shared.skill_db import record_outcome as db_record_outcome
+    from trs.shared.skill_db import record_outcome as db_record_outcome
 
     skill_id = _ensure_skill_in_db(skill)
     conn = _get_db()
@@ -532,8 +533,8 @@ def record_outcome(
 def _run_analysis(skill_name: str, success: bool, context: str) -> dict | None:
     """Run post-task analysis via LLM. Returns parsed analysis or None."""
     try:
-        from shared.skill_analyzer import analyze_task
-        from shared.skill_llm_backend import ClaudePClient
+        from trs.shared.skill_analyzer import analyze_task
+        from trs.shared.skill_llm_backend import ClaudePClient
 
         _, md_path = _find_skill(skill_name)
         if md_path is None:
@@ -560,8 +561,8 @@ def _run_analysis(skill_name: str, success: bool, context: str) -> dict | None:
 def _check_and_report_triggers(skill_id: str) -> dict | None:
     """Check if a skill is eligible for evolution. Returns info dict or None."""
     try:
-        from shared.skill_triggers import is_evolution_eligible
-        from shared.skill_db import get_skill_record, computed_rates
+        from trs.shared.skill_triggers import is_evolution_eligible
+        from trs.shared.skill_db import get_skill_record, computed_rates
 
         conn = _get_db()
         if not is_evolution_eligible(conn, skill_id):
@@ -586,10 +587,10 @@ def _check_and_report_triggers(skill_id: str) -> dict | None:
 def _run_evolution(skill_name: str, direction: str = "") -> dict:
     """Execute FIX evolution on a skill. Returns result dict."""
     try:
-        from shared.skill_evolver import evolve_skill
-        from shared.skill_triggers import is_evolution_eligible
-        from shared.skill_db import get_skill_by_name, computed_rates
-        from shared.skill_llm_backend import ClaudePClient
+        from trs.shared.skill_evolver import evolve_skill
+        from trs.shared.skill_triggers import is_evolution_eligible
+        from trs.shared.skill_db import get_skill_by_name, computed_rates
+        from trs.shared.skill_llm_backend import ClaudePClient
 
         conn = _get_db()
         rec = get_skill_by_name(conn, skill_name)
@@ -690,10 +691,10 @@ def trigger_evolution(
 def _run_derived_evolution(skill_name: str, direction: str = "") -> dict:
     """Execute DERIVED evolution on a skill. Returns result dict."""
     try:
-        from shared.skill_evolver import evolve_derived
-        from shared.skill_triggers import is_evolution_eligible
-        from shared.skill_db import get_skill_by_name, computed_rates
-        from shared.skill_llm_backend import ClaudePClient
+        from trs.shared.skill_evolver import evolve_derived
+        from trs.shared.skill_triggers import is_evolution_eligible
+        from trs.shared.skill_db import get_skill_by_name, computed_rates
+        from trs.shared.skill_llm_backend import ClaudePClient
 
         conn = _get_db()
         rec = get_skill_by_name(conn, skill_name)
@@ -749,8 +750,8 @@ def capture_skill(
         context: Execution context where the pattern was observed.
     """
     try:
-        from shared.skill_evolver import evolve_captured
-        from shared.skill_llm_backend import ClaudePClient
+        from trs.shared.skill_evolver import evolve_captured
+        from trs.shared.skill_llm_backend import ClaudePClient
 
         conn = _get_db()
         client = ClaudePClient()
@@ -775,7 +776,7 @@ def skill_lineage(skill: str) -> dict:
     Args:
         skill: Skill name to trace lineage for.
     """
-    from shared.skill_db import get_skill_by_name, get_skill_lineage
+    from trs.shared.skill_db import get_skill_by_name, get_skill_lineage
 
     conn = _get_db()
     rec = get_skill_by_name(conn, skill)
@@ -808,7 +809,7 @@ def skill_health() -> dict:
     (completion_rate < 35% or fallback_rate > 40%).
     Skills with < 5 selections show as 'insufficient_data'.
     """
-    from shared.skill_db import get_skill_health
+    from trs.shared.skill_db import get_skill_health
 
     conn = _get_db()
     health = get_skill_health(conn)
