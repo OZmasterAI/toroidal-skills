@@ -78,23 +78,23 @@ if _args.http:
     from starlette.responses import Response
 
     @mcp.custom_route("/.well-known/oauth-authorization-server", methods=["GET"])
-    async def _oauth_as_metadata(request: Request) -> Response:
+    async def _oauth_as_metadata(_request: Request) -> Response:
         return Response(status_code=404)
 
     @mcp.custom_route("/.well-known/oauth-protected-resource", methods=["GET"])
-    async def _oauth_protected_resource(request: Request) -> Response:
+    async def _oauth_protected_resource(_request: Request) -> Response:
         return Response(status_code=404)
 
     @mcp.custom_route("/.well-known/openid-configuration", methods=["GET"])
-    async def _openid_config(request: Request) -> Response:
+    async def _openid_config(_request: Request) -> Response:
         return Response(status_code=404)
 
     @mcp.custom_route("/register", methods=["POST"])
-    async def _oauth_register(request: Request) -> Response:
+    async def _oauth_register(_request: Request) -> Response:
         return Response(status_code=404)
 
     @mcp.custom_route("/authorize", methods=["GET"])
-    async def _oauth_authorize(request: Request) -> Response:
+    async def _oauth_authorize(_request: Request) -> Response:
         return Response(status_code=404)
 
 
@@ -131,7 +131,7 @@ def _index_all_skills():
     if engine is None:
         return
     for name in _all_available_skills():
-        skill_dir, md_path = _find_skill(name)
+        _, md_path = _find_skill(name)
         if md_path is None:
             continue
         try:
@@ -345,7 +345,7 @@ def invoke_skill(name: str) -> dict:
     """
     from trs.shared.skill_db import record_selection
 
-    skill_dir, md_path = _find_skill(name)
+    _, md_path = _find_skill(name)
 
     if md_path is None:
         return {
@@ -569,6 +569,8 @@ def _check_and_report_triggers(skill_id: str) -> dict | None:
             return None
 
         rec = get_skill_record(conn, skill_id)
+        if rec is None:
+            return None
         rates = computed_rates(rec)
         return {
             "skill_id": skill_id,
@@ -605,7 +607,7 @@ def _run_evolution(skill_name: str, direction: str = "") -> dict:
             }
 
         skill_dir, md_path = _find_skill(skill_name)
-        if md_path is None:
+        if md_path is None or skill_dir is None:
             return {
                 "success": False,
                 "error": f"Skill '{skill_name}' SKILL.md not found",
@@ -706,7 +708,7 @@ def _run_derived_evolution(skill_name: str, direction: str = "") -> dict:
             return {"success": False, "error": f"Skill '{skill_name}' not eligible"}
 
         skill_dir, md_path = _find_skill(skill_name)
-        if md_path is None:
+        if md_path is None or skill_dir is None:
             return {"success": False, "error": f"Skill '{skill_name}' not found"}
 
         rates = computed_rates(rec)
