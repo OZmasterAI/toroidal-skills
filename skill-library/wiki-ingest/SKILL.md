@@ -18,7 +18,7 @@ When the user says "ingest this", "add this source", "process this article", or 
 7. **UPDATE INDEX** — Add new pages to `~/vault/wiki/_index.md`
 8. **APPEND LOG** — Add ingest entry to `~/vault/wiki/log.md`:
    `## [YYYY-MM-DD] ingest | source-name — key topics updated`
-9. **REMEMBER** — `remember_this()` with raw source summary for LanceDB backup
+9. **REMEMBER** — `remember_this()` with raw source summary for memory backup
 
 ## Source Types
 - **URL**: Fetch and extract content, save rendered markdown to `raw/`

@@ -6,7 +6,7 @@ After fixes, decisions, discoveries, or during wrap-up. Anytime knowledge should
 ## Steps
 1. **FIND RELEVANT PAGES** — Read `~/vault/wiki/_index.md` to find pages related to the current topic
 2. **UPDATE OR CREATE** — For each touched topic:
-   - If page exists: revise content, update `last_updated` and `session` in frontmatter, add `mem:` links for new LanceDB entries
+   - If page exists: revise content, update `last_updated` and `session` in frontmatter, add `mem:` links for new memory entries
    - If no page exists: create one using the template below
 3. **CROSS-REFERENCE** — Update `## Related` sections bidirectionally:
    - If page A now links to page B, ensure page B links back to page A
@@ -42,7 +42,7 @@ File: `path/to/source.py` | Context: brief context
 
 ## Rules
 - Frontmatter fields: type, last_updated, session, project, tags — all required
-- `mem:` links use first 11 chars of LanceDB ID
+- `mem:` links use first 11 chars of memory ID
 - All writes use atomic pattern: write to .tmp, then os.replace()
 - Never delete existing content — revise or strikethrough instead
 - Cross-references MUST be bidirectional
