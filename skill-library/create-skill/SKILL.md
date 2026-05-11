@@ -33,7 +33,7 @@ Ask the user:
 ### Step 2: Create Directory Structure
 
 ```
-~/.claude/skill-library/{skill-name}/
+~/.claude/torus-skills/skill-library/{skill-name}/
 ├── SKILL.md              # Required: Main instructions
 ├── reference.md          # Optional: Detailed documentation
 ├── examples.md           # Optional: Usage examples
@@ -44,7 +44,7 @@ Ask the user:
 **Location Guide:**
 | Location | Path | Scope |
 |:---------|:-----|:------|
-| Personal | `~/.claude/skill-library/` | All your projects |
+| Personal | `~/.claude/torus-skills/skill-library/` | All your projects |
 | Project | `.claude/skills/` | Current repository |
 
 ### Step 3: Write SKILL.md
