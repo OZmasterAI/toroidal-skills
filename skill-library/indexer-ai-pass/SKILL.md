@@ -1,136 +1,125 @@
+---
+name: indexer-ai-pass
+description: "Run Tier 3 AI edge discovery on a code graph project. Orchestrates a 3-pass agent pipeline: Pass 1 (Haiku fleet) extracts explicit edges from file batches, Pass 2 (Sonnet fleet) finds implicit coupling, Pass 3 (Sonnet reviewer) detects structural anomalies. Requires T1 index to exist. When user says 'indexer ai pass', 'tier 3', 'AI edge discovery', 'run AI indexer', 't3 pass', or wants code relationships that static analysis missed."
+---
+
 # /indexer-ai-pass — AI Edge Discovery Pipeline
 
-## When to use
-When user says "indexer ai pass", "tier 3 pass", "AI edge discovery", "run AI indexer",
-or wants to find code relationships that static analysis missed.
-
-## Commands
-- `/invoke indexer-ai-pass [--project PATH] [--dry-run] [--batch-size N] [--pass 1|2|3|all]`
-
-Defaults: `--project` (required), `--batch-size 10`, `--pass all`
+## Arguments
+- `project_path`: (required) Absolute path to the project root
+- `project_name`: (optional) Override project name, default: basename of project_path
+- `batch_size`: (optional) Files per agent batch, default: 10
+- `pass_num`: (optional) Which pass to run: 1, 2, 3, or "all" (default: "all")
+- `dry_run`: (optional) If "true", show plan without executing
 
 ## Flow
 
 ### 1. VALIDATE
-Check project has Tier 1 index:
+Check project has T1 index:
 ```bash
 python3 -c "
 import sys; sys.path.insert(0, '$HOME/.claude/toroidal-indexer')
 from indexer.schema import connect_code_graph
 db = connect_code_graph()
-r = db.query('SELECT count() FROM code_node GROUP ALL')
-count = r[0].get('count', 0) if r else 0
+r = db.query(\"SELECT count() AS c FROM code_node WHERE project='\$PROJECT_NAME' GROUP ALL\")
+count = r[0]['c'] if r else 0
 print(f'Nodes: {count}')
-assert count > 0, 'No code_node entries — run Tier 1 build first'
+if count == 0: print('ERROR: No nodes — run T1 build first'); sys.exit(1)
 "
 ```
-If assertion fails, tell user to run `python3 ~/.claude/toroidal-indexer/indexer/build.py --project PATH` first.
+Replace `$PROJECT_NAME` with the actual project name.
+If 0 nodes, tell user to run T1 first and stop.
 
 ### 2. PLAN
-Get file list and batch plan:
 ```bash
-python3 ~/.claude/toroidal-indexer/scripts/ai_pass.py run --project PATH --dry-run --batch-size N
+python3 ~/.claude/toroidal-indexer/scripts/ai_pass.py run --project $PROJECT_PATH --dry-run --batch-size $BATCH_SIZE
 ```
-Parse the JSON output. Show user:
-- Total files, batch count, estimated agents (batches * 2 + 1)
-- Estimated cost: ~$0.002 per Haiku batch, ~$0.01 per Sonnet batch
-- Which passes will run (based on `--pass` flag)
+Parse the JSON output. Show user: total files, batch count, estimated agents, which passes will run.
+Ask user to confirm before proceeding. If `dry_run` is "true", stop here.
 
-Ask user to confirm before proceeding.
-
-### 3. PASS 1 — HAIKU FLEET
-Generate prompt for each batch using the `prompt` subcommand:
+### 3. PASS 1 — HAIKU FLEET (explicit edge extraction)
+For each batch index (0 to pass1_batches-1):
+1. Generate the prompt:
 ```bash
-python3 ~/.claude/toroidal-indexer/scripts/ai_pass.py prompt --project PATH --pass 1 --batch INDEX --batch-size N
+python3 ~/.claude/toroidal-indexer/scripts/ai_pass.py prompt --project $PROJECT_PATH --pass 1 --batch $INDEX --batch-size $BATCH_SIZE
 ```
+2. Capture the full prompt output text.
 
-Spawn **ALL Pass 1 agents in parallel** (single message, multiple Agent calls):
+Spawn agents in waves of up to 5 per message. Each agent:
 ```
-Agent(subagent_type="explore", model="haiku", prompt=<generated prompt>)
+Agent(subagent_type="builder", model="haiku", prompt="You are a code analysis agent. Read the files listed below and output ONLY a valid JSON array of code edges. No markdown fencing, no explanation.\n\n<prompt from step 1>\n\nAfter reading all files, output the JSON array.")
 ```
+Use `builder` type so agents can Read files.
 
-For each completed agent:
-1. Get the agent output text (JSON edge array)
-2. Pipe to storage:
+For each completed agent, extract the JSON array from its response and store:
 ```bash
-echo '<agent_output_json_array>' | python3 ~/.claude/toroidal-indexer/scripts/ai_pass.py store --stdin --project PROJECT_NAME --pass 1
+echo '$AGENT_JSON_OUTPUT' | python3 ~/.claude/toroidal-indexer/scripts/ai_pass.py store --stdin --project $PROJECT_NAME --pass 1
 ```
-3. Check the returned JSON summary for errors
 
-**CRITICAL: Wait for ALL Pass 1 agents to complete AND all edges to be stored before proceeding to Pass 2.**
+**CRITICAL: ALL Pass 1 agents must complete and ALL edges must be stored before starting Pass 2.**
 
-If more than 5 batches, split into waves of 5 agents each.
+If `pass_num` is "1", skip to SUMMARY.
 
-If `--pass 1`, stop here and show summary. Otherwise continue.
-
-### 4. PASS 2 — SONNET FLEET
-Generate prompt for each batch (includes Pass 1 edges as context):
+### 4. PASS 2 — SONNET FLEET (implicit coupling)
+For each batch index:
+1. Generate the prompt (includes Pass 1 edges as context):
 ```bash
-python3 ~/.claude/toroidal-indexer/scripts/ai_pass.py prompt --project PATH --pass 2 --batch INDEX --batch-size N
+python3 ~/.claude/toroidal-indexer/scripts/ai_pass.py prompt --project $PROJECT_PATH --pass 2 --batch $INDEX --batch-size $BATCH_SIZE
+```
+2. Spawn agents in waves of up to 5:
+```
+Agent(subagent_type="builder", model="sonnet", prompt="You are a code coupling analyst. Read the files and find IMPLICIT relationships not in the known edges list. Output ONLY a valid JSON array.\n\n<prompt from step 1>")
 ```
 
-Spawn **ALL Pass 2 agents in parallel**:
-```
-Agent(subagent_type="explore", model="sonnet", prompt=<generated prompt>)
-```
+Store each result with `--pass 2`.
 
-For each completed agent:
-1. Parse output — agent should return JSON array
-2. Store: `echo '<json>' | python3 ~/.claude/toroidal-indexer/scripts/ai_pass.py store --stdin --project PROJECT_NAME --pass 2`
+**CRITICAL: ALL Pass 2 storage must complete before Pass 3.**
 
-**CRITICAL: Wait for ALL Pass 2 storage to complete before proceeding to Pass 3.**
+If `pass_num` is "2", skip to SUMMARY.
 
-If `--pass 2`, stop here.
-
-### 5. PASS 3 — SONNET REVIEWER
+### 5. PASS 3 — SONNET REVIEWER (anomaly detection)
 Generate the reviewer prompt:
 ```bash
-python3 ~/.claude/toroidal-indexer/scripts/ai_pass.py prompt --project PATH --pass 3
+python3 ~/.claude/toroidal-indexer/scripts/ai_pass.py prompt --project $PROJECT_PATH --pass 3
 ```
 
-Spawn single reviewer:
+Spawn single reviewer agent:
 ```
-Agent(subagent_type="builder", model="sonnet", prompt=<generated prompt>)
+Agent(subagent_type="builder", model="sonnet", prompt="You are a code graph reviewer. Analyze the graph summary below and find structural anomalies — isolated nodes that should have edges, missing connections, asymmetric relationships. Output ONLY a valid JSON array of correction edges.\n\n<prompt from above>")
 ```
 
-Parse and store with `--pass 3`.
+Store result with `--pass 3`.
 
 ### 6. SUMMARY
-Report final results:
 ```bash
 python3 -c "
 import sys; sys.path.insert(0, '$HOME/.claude/toroidal-indexer')
 from indexer.schema import connect_code_graph, VALID_RELATIONS
 db = connect_code_graph()
 total = 0
-for rel in VALID_RELATIONS:
+for rel in sorted(VALID_RELATIONS):
     for p in [1, 2, 3]:
-        r = db.query(f'SELECT count() FROM {rel} WHERE pass={p} GROUP ALL')
-        c = r[0].get('count', 0) if r else 0
+        try:
+            r = db.query(f'SELECT count() AS c FROM {rel} WHERE pass={p} AND in.project=\"\$PROJECT_NAME\" GROUP ALL')
+            c = r[0]['c'] if r else 0
+        except: c = 0
         if c > 0:
             print(f'  Pass {p} | {rel}: {c}')
             total += c
-print(f'Total new AI edges: {total}')
+print(f'Total AI edges: {total}')
 "
 ```
-
-## Dry-run mode
-With `--dry-run`, show the plan (file count, batches, agent count, cost estimate) without spawning any agents.
-
-## Single-pass mode
-- `--pass 1`: Only Pass 1 (Haiku, cheap, good for testing)
-- `--pass 2`: Only Pass 2 (requires Pass 1 already stored)
-- `--pass 3`: Only Pass 3 (requires Pass 1+2 already stored)
-- `--pass all` (default): All three passes sequentially
+Replace `$PROJECT_NAME`. Report per-pass breakdown and total.
 
 ## Rollback
-Per-pass: `DELETE calls WHERE pass=1; DELETE imports WHERE pass=1;` etc.
-Full AI: `DELETE calls WHERE confidence=0.8;` for each relation table.
+Per-pass: `DELETE calls WHERE pass=1 AND in.project='PROJECT_NAME'` etc. for each relation.
+Full AI rollback: delete edges where pass IN [1,2,3] for the project.
 
 ## Rules
-- NEVER spawn Pass 2 agents before Pass 1 storage is fully complete
-- NEVER spawn Pass 3 before Pass 2 storage is fully complete
-- ALL agents within a pass run in PARALLEL (multiple Agent calls in one message)
-- Maximum 5 Agent calls per message (split into waves if more batches)
-- Pass 3 receives compact graph summary, NOT raw edge JSON
+- NEVER start Pass N+1 before Pass N is fully stored
+- Agents within a pass run in PARALLEL (multiple Agent calls in one message)
+- Maximum 5 Agent calls per message — split into waves if more batches
+- Use `builder` subagent type (agents need Read access to source files)
+- Pass 3 receives a compact graph summary, NOT raw edges
 - All AI edges get confidence=0.8, tagged with pass number
+- If a batch agent returns invalid JSON, skip it and log the error

@@ -159,15 +159,24 @@ def crash_proof(fn):
 
 
 def _get_description(skill_path: str) -> str:
-    """Extract first non-heading, non-empty line from SKILL.md as description."""
+    """Extract description from SKILL.md — YAML frontmatter 'description' field, or first non-heading line."""
     md_path = os.path.join(skill_path, "SKILL.md")
     if not os.path.exists(md_path):
         return "(no SKILL.md)"
     with open(md_path, "r") as f:
-        for line in f:
-            line = line.strip()
-            if line and not line.startswith("#"):
-                return line[:120]
+        lines = f.readlines()
+    if lines and lines[0].strip() == "---":
+        for i, line in enumerate(lines[1:], 1):
+            if line.strip() == "---":
+                break
+            if line.strip().startswith("description:"):
+                desc = line.split(":", 1)[1].strip().strip('"').strip("'")
+                if desc:
+                    return desc[:120]
+    for line in lines:
+        line = line.strip()
+        if line and not line.startswith("#") and line != "---":
+            return line[:120]
     return "(no description)"
 
 
